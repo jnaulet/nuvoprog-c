@@ -1,0 +1,3 @@
+[submodule "intelhex"]
+	path = intelhex
+	url = https://github.com/vfiksdal/intelhex.git
