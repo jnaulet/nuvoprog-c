@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 struct nulink1_frame {
     uint8_t seqno;
@@ -41,12 +42,12 @@ int probe_init(struct probe *ctx)
     ctx->handle = NULL;
 
     if ((res = libusb_init(&ctx->usb)) < 0) {
-	VERBOSE(LEVEL_ERR, "libusb: can't init context\n");
+	VERBOSE(LOG_ERR, "libusb: can't init context\n");
 	return res;
     }
 
     if ((n = (int) libusb_get_device_list(ctx->usb, &list)) < 0) {
-	VERBOSE(LEVEL_ERR, "libusb: can't get device list\n");
+	VERBOSE(LOG_ERR, "libusb: can't get device list\n");
 	return n;
     }
 
@@ -58,7 +59,7 @@ int probe_init(struct probe *ctx)
 	    continue;
 
 	if (desc.idVendor == 0x0416 && desc.idProduct == 0x511c) {
-	    VERBOSE(LEVEL_INFO,
+	    VERBOSE(LOG_INFO,
 	            "nuvoprog: found NuLink1 compatible device\n");
 	    ctx->dev = device;
 	    ctx->type = PROBE_NULINK1;
@@ -69,15 +70,15 @@ int probe_init(struct probe *ctx)
     libusb_free_device_list(list, 1);
 
     if (ctx->dev == NULL || ctx->type == PROBE_UNKNOWN) {
-	VERBOSE(LEVEL_ERR, "libusb: can't find a compatible usb device\n");
+	VERBOSE(LOG_ERR, "libusb: can't find a compatible usb device\n");
 	libusb_exit(ctx->usb);
-	return -1;
+	return -(errno = ENOENT);
     }
 
     if ((res = libusb_open(ctx->dev, &ctx->handle)) != 0) {
-	VERBOSE(LEVEL_ERR, "libusb: can't open device\n");
+	VERBOSE(LOG_ERR, "libusb: can't open device\n");
 	libusb_exit(ctx->usb);
-	return -1;
+	return -(errno = EIO);
     }
 
     /* init protocol variables */
@@ -112,16 +113,16 @@ static int probe_req(struct probe *ctx, struct nulink1_frame *frame,
     if (libusb_bulk_transfer
 	(ctx->handle, EP_OUT, frame8, sizeof(*frame), &xfered,
 	 EP_TIMEOUT) != 0 || xfered != (int) sizeof(*frame)) {
-	VERBOSE(LEVEL_ERR,
+	VERBOSE(LOG_ERR,
 	        "libusb: bulk req to EP_OUT incomplete or failed (%d)\n",
 	        xfered);
-	return -1;
+	return -(errno = EIO);
     }
 
-    VERBOSE(LEVEL_DBG, "> ");
+    VERBOSE(LOG_DBG, " > ");
     for (size_t i = 0; i < sizeof(*frame); i++)
-	VERBOSE(LEVEL_DBG, "%02x", (unsigned) frame8[i]);
-    VERBOSE(LEVEL_DBG, "\n");
+	VERBOSE(LOG_DBG, "%02x", (unsigned) frame8[i]);
+    VERBOSE(LOG_DBG, "\n");
 
     return xfered;
 }
@@ -134,23 +135,23 @@ static int probe_resp(struct probe *ctx, struct nulink1_frame *frame)
     if (libusb_bulk_transfer
 	(ctx->handle, EP_IN, frame8, sizeof(*frame), &xfered,
 	 EP_TIMEOUT) != 0 || xfered != (int) sizeof(*frame)) {
-	VERBOSE(LEVEL_ERR,
+	VERBOSE(LOG_ERR,
 	        "libusb: bulk resp from EP_IN incomplete or failed (%d)\n",
 	        xfered);
-	return -1;
+	return -(errno = EIO);
     }
 
-    VERBOSE(LEVEL_DBG, "< ");
+    VERBOSE(LOG_DBG, " < ");
     for (size_t i = 0; i < sizeof(*frame); i++)
-	VERBOSE(LEVEL_DBG, "%02x", (unsigned) frame8[i]);
-    VERBOSE(LEVEL_DBG, "\n");
+	VERBOSE(LOG_DBG, "%02x", (unsigned) frame8[i]);
+    VERBOSE(LOG_DBG, "\n");
 
     /* check seqno */
     if (frame->seqno != ctx->seqno) {
-	VERBOSE(LEVEL_ERR, "probe: errnoeous seqno (%u, expected %u)\n",
+	VERBOSE(LOG_ERR, "probe: errnoeous seqno (%u, expected %u)\n",
 	        frame->seqno, ctx->seqno);
 	/* error */
-	return -1;
+	return -(errno = ECOMM);
     }
 
     return xfered;
@@ -164,15 +165,18 @@ int probe_get_version(struct probe *ctx,
     /* request max length */
     memset(frame.body, 0xff, sizeof(frame.body));
 
-    (void) probe_req(ctx, &frame, sizeof(frame.body));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(frame.body)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR, "probe_get_version: probe communication error\n");
+	return -(errno = ECOMM);
+    }
 
     /*
      * debug
      */
     struct nulink1_version_info *info =
         (struct nulink1_version_info *) frame.body;
-    VERBOSE(LEVEL_INFO, "firmware version: %x product_id %x, flags %x\n",
+    VERBOSE(LOG_INFO, "firmware version: %x product_id %x, flags %x\n",
             info->firmware_version, info->product_id, info->flags);
 
     memcpy(rinfo, info, sizeof(*rinfo));
@@ -196,12 +200,19 @@ int probe_set_config(struct probe *ctx,
     } else
 	memcpy(config, nulink1_config, sizeof(*config));
 
-    (void) probe_req(ctx, &frame, sizeof(*config));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(*config)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR, "probe_set_config: probe communication error\n");
+	return -(errno = ECOMM);
+    }
 
-    /*
-     * debug
-     */
+    /* double-check */
+    if (config->command != (uint32_t) 0xa2) {
+	VERBOSE(LOG_ERR,
+	        "probe_set_config: unexpected command field (%x)\n",
+	        config->command);
+	return -(errno = ECOMM);
+    }
 
     return 0;
 }
@@ -217,12 +228,18 @@ int probe_reset(struct probe *ctx, int reset_type,
     reset->reset_conn_type = (uint32_t) reset_conn_type;
     reset->reset_mode = (uint32_t) reset_mode;
 
-    (void) probe_req(ctx, &frame, sizeof(*reset));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(*reset)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR, "probe_reset: probe communication error\n");
+	return -(errno = ECOMM);
+    }
 
-    /*
-     * debug
-     */
+    /* double-check */
+    if (reset->command != (uint32_t) 0xe2) {
+	VERBOSE(LOG_ERR, "probe_reset: unexpected command field (%x)\n",
+	        reset->command);
+	return -(errno = ECOMM);
+    }
 
     return 0;
 }
@@ -236,13 +253,25 @@ int probe_get_device_id(struct probe *ctx, uint32_t *rid)
     devid->command = (uint32_t) 0xa3;
     devid->device_id = 0;
 
-    (void) probe_req(ctx, &frame, sizeof(*devid));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(*devid)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR,
+	        "probe_get_device_id: probe communication error\n");
+	return -(errno = ECOMM);
+    }
+
+    /* double-check */
+    if (devid->command != (uint32_t) 0xa3) {
+	VERBOSE(LOG_ERR,
+	        "probe_get_device_id: unexpected command field (%x)\n",
+	        devid->command);
+	return -(errno = ECOMM);
+    }
 
     /*
      * debug
      */
-    VERBOSE(LEVEL_DBG, "device id: %x\n", devid->device_id);
+    VERBOSE(LOG_DBG, "device id: %x\n", devid->device_id);
 
     *rid = devid->device_id;
     return 0;
@@ -255,8 +284,20 @@ int probe_erase_flash_chip(struct probe *ctx)
     /* no params */
     *(uint32_t *) frame.body = (uint32_t) 0xa4;
 
-    (void) probe_req(ctx, &frame, sizeof(uint32_t));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(uint32_t)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR,
+	        "probe_erase_flash_chip: probe communication error\n");
+	return -(errno = ECOMM);
+    }
+
+    /* double-check */
+    if (*(uint32_t *) frame.body != (uint32_t) 0xa4) {
+	VERBOSE(LOG_ERR,
+	        "probe_erase_flash_chip: unexpected command field (%x)\n",
+	        *(uint32_t *) frame.body);
+	return -(errno = ECOMM);
+    }
 
     return 0;
 }
@@ -274,8 +315,20 @@ int probe_write_memory(struct probe *ctx,
     memory->length = (uint32_t) n;
     memcpy(memory->data, data, n);
 
-    (void) probe_req(ctx, &frame, sizeof(*memory));
-    (void) probe_resp(ctx, &frame);
+    if (probe_req(ctx, &frame, sizeof(*memory)) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR,
+	        "probe_write_memory: probe communication error\n");
+	return -(errno = ECOMM);
+    }
+
+    /* double-check */
+    if (memory->command != (uint32_t) 0xa0) {
+	VERBOSE(LOG_ERR,
+	        "probe_write_memory: unexpected command field (%x)\n",
+	        memory->command);
+	return -(errno = ECOMM);
+    }
 
     return 0;
 }
@@ -285,8 +338,22 @@ int probe_unknown_a5(struct probe *ctx)
     static struct nulink1_frame frame;
 
     /* just push 24 zeroes */
-    (void) probe_req(ctx, &frame, (size_t) 24);
-    (void) probe_resp(ctx, &frame);
+    *(uint32_t *) frame.body = (uint32_t) 0xa5;
+
+    if (probe_req(ctx, &frame, (size_t) 24) < 0 ||
+	probe_resp(ctx, &frame) < 0) {
+	VERBOSE(LOG_ERR,
+	        "probe_erase_flash_chip: probe communication error\n");
+	return -(errno = ECOMM);
+    }
+
+    /* double-check */
+    if (*(uint32_t *) frame.body != (uint32_t) 0xa5) {
+	VERBOSE(LOG_ERR,
+	        "probe_erase_flash_chip: unexpected command field (%x)\n",
+	        *(uint32_t *) frame.body);
+	return -(errno = ECOMM);
+    }
 
     return 0;
 }

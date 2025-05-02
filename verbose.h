@@ -3,9 +3,9 @@
 
 extern int verbose_level;
 
-#define LEVEL_ERR  0
-#define LEVEL_INFO 1
-#define LEVEL_DBG  2
+#define LOG_ERR  0
+#define LOG_INFO 1
+#define LOG_DBG  2
 
 #define VERBOSE(level, ...)                                     \
   do                                                            \

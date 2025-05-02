@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <string.h>
+#include <errno.h>
 
 #include "probe.h"
 #include "verbose.h"
 
 #include "ihex.h"
 
-int verbose_level = LEVEL_INFO;
+int verbose_level = LOG_INFO;
 static struct probe probe;
 
 typedef enum {
@@ -24,32 +25,41 @@ static int connect_to_target(void)
     struct nulink1_version_info info;
 
     /* automated requests */
-    probe_get_version(&probe, &info);
+    (void) probe_get_version(&probe, &info);
     /* Setting config {1000 1T8051 3300 0 0} */
-    probe_set_config(&probe, NULL);
+    (void) probe_set_config(&probe, NULL);
     /* Performing reset {Auto ICP Mode Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
-                RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
+                       RESET_MODE_EXTMODE);
     /* Performing reset {None (NuLink) ICP Mode Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_NONE_NULINK,
-                RESET_CONN_TYPE_ICPMODE, RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_NONE_NULINK,
+                       RESET_CONN_TYPE_ICPMODE, RESET_MODE_EXTMODE);
     /* Checking device ID */
-    probe_get_device_id(&probe, &device_id);
+    if (probe_get_device_id(&probe, &device_id) < 0) {
+	VERBOSE(LOG_ERR, "connect_to_target: can't get device ID\n");
+	return -(errno = ECOMM);
+    }
 
-    return 0;
+    if (device_id == (uint32_t) DEVICE_ID_N76E003 ||
+        device_id == (uint32_t) DEVICE_ID_N76E616 ||
+        device_id == (uint32_t) DEVICE_ID_MS51FB)
+	return 0;
+
+    VERBOSE(LOG_ERR, "connect_to_target: unknown device %x\n", device_id);
+    return -(errno = ENOENT);
 }
 
 static int reset(void)
 {
     /* Performing reset {Auto ICP Mode Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
-                RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
+                       RESET_MODE_EXTMODE);
     /* Performing reset {Auto Disconnect 0x00000001} */
-    probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_DISCONNECT,
-                RESET_MODE_MODE1);
+    (void) probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_DISCONNECT,
+                       RESET_MODE_MODE1);
     /* Performing reset {None (NuLink) Disconnect Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_NONE_NULINK,
-                RESET_CONN_TYPE_DISCONNECT, RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_NONE_NULINK,
+                       RESET_CONN_TYPE_DISCONNECT, RESET_MODE_EXTMODE);
 
     return 0;
 }
@@ -72,21 +82,23 @@ static int program(const char *path)
     memory_t *head = &memory;
 
     /* Erasing flash */
-    probe_erase_flash_chip(&probe);
+    (void) probe_erase_flash_chip(&probe);
     /* Writing 32 bytes to config 0x0000 */
-    probe_write_memory(&probe, 0x0000, MEMORY_SPACE_CONFIG,
-                       "\xef\xff\xff\xff\xff\xff\xff\xff"
-                       "\xff\xff\xff\xff\xff\xff\xff\xff"
-                       "\xff\xff\xff\xff\xff\xff\xff\xff"
-                       "\xff\xff\xff\xff\xff\xff\xff\xff", (size_t) 32);
+    (void) probe_write_memory(&probe, 0x0000, MEMORY_SPACE_CONFIG,
+                              "\xef\xff\xff\xff\xff\xff\xff\xff"
+                              "\xff\xff\xff\xff\xff\xff\xff\xff"
+                              "\xff\xff\xff\xff\xff\xff\xff\xff"
+                              "\xff\xff\xff\xff\xff\xff\xff\xff",
+                              (size_t) 32);
 
     /* ihex parsing */
     memory_init(&memory);
     int n = parse_file((char *) path, &memory);
+    /* align to the next 1k block */
     int write_size =
         (memory_size(&memory) & ~FLASH_ALIGN_SIZE) + FLASH_ALIGN_SIZE;
 
-    VERBOSE(LEVEL_DBG,
+    VERBOSE(LOG_DBG,
             "program: parsed %d bytes in %d segments with %d records\n",
             memory_size(&memory), memory_count(&memory), n);
 
@@ -98,7 +110,7 @@ static int program(const char *path)
 	int address = head->segment->address;
 	int size = head->segment->size;
 
-	VERBOSE(LEVEL_DBG, "program: segment #%d (0x%x - 0x%x)\n",
+	VERBOSE(LOG_DBG, "program: segment #%d (0x%x - 0x%x)\n",
 	        i + 1, address, address + size);
 
 	/* to linear memory */
@@ -109,22 +121,23 @@ static int program(const char *path)
 
     /* actual flashing */
     for (int addr = 0; addr < write_size; addr += FLASH_BLOCK_SIZE)
-        /* write */
-	probe_write_memory(&probe, addr, MEMORY_SPACE_PROGRAM,
-                           &flash_mem[addr], (size_t) FLASH_BLOCK_SIZE);
+        /* write, no control (!) */
+	(void) probe_write_memory(&probe, addr, MEMORY_SPACE_PROGRAM,
+                                  &flash_mem[addr],
+                                  (size_t) FLASH_BLOCK_SIZE);
 
     /* no need for this anymore */
     memory_free(&memory);
 
     /* Performing reset {Auto ICP Mode Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
-                RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_ICPMODE,
+                       RESET_MODE_EXTMODE);
     /* Performing reset {Auto Disconnect 0x00000001} */
-    probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_DISCONNECT,
-                RESET_MODE_MODE1);
+    (void) probe_reset(&probe, RESET_TYPE_AUTO, RESET_CONN_TYPE_DISCONNECT,
+                       RESET_MODE_MODE1);
     /* Performing reset {None (NuLink) Disconnect Ext Mode} */
-    probe_reset(&probe, RESET_TYPE_NONE_NULINK,
-                RESET_CONN_TYPE_DISCONNECT, RESET_MODE_EXTMODE);
+    (void) probe_reset(&probe, RESET_TYPE_NONE_NULINK,
+                       RESET_CONN_TYPE_DISCONNECT, RESET_MODE_EXTMODE);
 
     return 0;
 #undef FLASH_MEM_SIZE
@@ -134,14 +147,14 @@ static int program(const char *path)
 
 static void print_usage(const char *argv0)
 {
-    VERBOSE(LEVEL_INFO, "Usage: %s [options]\n", argv0);
-    VERBOSE(LEVEL_INFO, "Options are:\n");
-    VERBOSE(LEVEL_INFO, " --reset|-r        Reset probe/chip\n");
-    VERBOSE(LEVEL_INFO, " --erase|-e        Erase chip flash\n");
-    VERBOSE(LEVEL_INFO,
+    VERBOSE(LOG_INFO, "Usage: %s [options]\n", argv0);
+    VERBOSE(LOG_INFO, "Options are:\n");
+    VERBOSE(LOG_INFO, " --reset|-r        Reset probe/chip\n");
+    VERBOSE(LOG_INFO, " --erase|-e        Erase chip flash\n");
+    VERBOSE(LOG_INFO,
             " --program|-p ihex Program ihex file to chip memory\n");
-    VERBOSE(LEVEL_INFO, " --verbose|-v      Display more information\n");
-    VERBOSE(LEVEL_INFO, " --help|-h         Displays this message\n");
+    VERBOSE(LOG_INFO, " --verbose|-v      Display more information\n");
+    VERBOSE(LOG_INFO, " --help|-h         Displays this message\n");
 }
 
 int main(int argc, char **argv)
@@ -174,7 +187,7 @@ int main(int argc, char **argv)
 	    arg = optarg;
 	    break;
 	case 'v':
-	    verbose_level = LEVEL_DBG;
+	    verbose_level = LOG_DBG;
 	    break;
 	case 'h':              /*@fallthrough@ */
 	default:
@@ -190,23 +203,26 @@ int main(int argc, char **argv)
 
     /* options are ok */
     if (probe_init(&probe) != 0)
-	VERBOSE(LEVEL_ERR, "probe: can't init\n");
+	VERBOSE(LOG_ERR, "Can't init probe\n");
 
     /* normal procedure */
-    (void) connect_to_target();
+    if (connect_to_target() != 0) {
+	VERBOSE(LOG_ERR, "Can't connect to target\n");
+	return 1;
+    }
 
     switch (command) {
     case COMMAND_RESET:
-	reset();
+	(void) reset();
 	break;
     case COMMAND_ERASE:
-	erase();
+	(void) erase();
 	break;
     case COMMAND_PROGRAM:
-	program(arg);
+	(void) program(arg);
 	break;
     default:
-	VERBOSE(LEVEL_ERR, "Unknown command %d\n", (int) command);
+	VERBOSE(LOG_ERR, "Unknown command %d\n", (int) command);
 	print_usage(argv[0]);
 	return 1;
     }
