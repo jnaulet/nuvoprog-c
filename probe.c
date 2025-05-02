@@ -83,8 +83,8 @@ int probe_init(struct probe *ctx)
 
     /* init protocol variables */
     ctx->seqno = 0;
-
-    return 0;
+    /* force reset */
+    return libusb_reset_device(ctx->handle);
 }
 
 void probe_release(struct probe *ctx)
