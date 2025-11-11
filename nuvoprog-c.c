@@ -73,7 +73,7 @@ static int erase(void)
 static int program(const char *path)
 {
 #define FLASH_BLOCK_SIZE 32
-#define FLASH_ALIGN_SIZE 1024
+#define FLASH_ALIGN_SIZE 4096
 #define FLASH_MEM_SIZE   32768
     static uint8_t flash_mem[FLASH_MEM_SIZE];
 
