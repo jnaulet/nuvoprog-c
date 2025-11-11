@@ -63,6 +63,8 @@ int probe_init(struct probe *ctx)
 	            "nuvoprog: found NuLink1 compatible device\n");
 	    ctx->dev = device;
 	    ctx->type = PROBE_NULINK1;
+	    /* don't look further for now */
+	    break;
 	}
     }
 
@@ -81,6 +83,10 @@ int probe_init(struct probe *ctx)
 	return -(errno = EIO);
     }
 
+    /* liusb stuff */
+    (void) libusb_detach_kernel_driver(ctx->handle, 0);
+    (void) libusb_claim_interface(ctx->handle, 0);
+
     /* init protocol variables */
     ctx->seqno = 0;
     /* force reset */
@@ -94,7 +100,9 @@ void probe_release(struct probe *ctx)
 
 static uint8_t probe_seqno(struct probe *ctx)
 {
-    return (uint8_t) (ctx->seqno = ((ctx->seqno + 1) & 0x7fu));
+    if (++ctx->seqno >= 0x80)
+	ctx->seqno = 1;
+    return (uint8_t) ctx->seqno;
 }
 
 #define EP_IN      0x81
