@@ -63,6 +63,7 @@ struct nulink1_config {
 #define DEVICE_ID_N76E003 0xda3650
 #define DEVICE_ID_N76E616 0xda2f50
 #define DEVICE_ID_MS51FB  0xda4b21
+#define DEVICE_ID_MS51PC  0xda5332
 
 #define MEMORY_SPACE_PROGRAM 0x0
 #define MEMORY_SPACE_CONFIG  0x3

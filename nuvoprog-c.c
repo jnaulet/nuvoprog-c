@@ -42,7 +42,8 @@ static int connect_to_target(void)
 
     if (device_id == (uint32_t) DEVICE_ID_N76E003 ||
         device_id == (uint32_t) DEVICE_ID_N76E616 ||
-        device_id == (uint32_t) DEVICE_ID_MS51FB)
+        device_id == (uint32_t) DEVICE_ID_MS51FB  ||
+        device_id == (uint32_t) DEVICE_ID_MS51PC)
 	return 0;
 
     VERBOSE(LOG_ERR, "connect_to_target: unknown device %x\n", device_id);
