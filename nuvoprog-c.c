@@ -42,7 +42,7 @@ static int connect_to_target(void)
 
     if (device_id == (uint32_t) DEVICE_ID_N76E003 ||
         device_id == (uint32_t) DEVICE_ID_N76E616 ||
-        device_id == (uint32_t) DEVICE_ID_MS51FB  ||
+        device_id == (uint32_t) DEVICE_ID_MS51FB ||
         device_id == (uint32_t) DEVICE_ID_MS51PC)
 	return 0;
 
@@ -86,7 +86,7 @@ static int program(const char *path)
     (void) probe_erase_flash_chip(&probe);
     /* Writing 32 bytes to config 0x0000 */
     (void) probe_write_memory(&probe, 0x0000, MEMORY_SPACE_CONFIG,
-                              "\xef\xff\xff\xff\xff\xff\xff\xff"
+                              "\xff\xff\xff\xff\xff\xff\xff\xff"
                               "\xff\xff\xff\xff\xff\xff\xff\xff"
                               "\xff\xff\xff\xff\xff\xff\xff\xff"
                               "\xff\xff\xff\xff\xff\xff\xff\xff",
@@ -95,13 +95,14 @@ static int program(const char *path)
     /* ihex parsing */
     memory_init(&memory);
     int n = parse_file((char *) path, &memory);
-    /* align to the next 1k block */
+    /* align to the next 4k block */
     int write_size =
-        (memory_size(&memory) & ~FLASH_ALIGN_SIZE) + FLASH_ALIGN_SIZE;
+        ((memory_size(&memory) - 1) & ~(FLASH_ALIGN_SIZE - 1)) +
+        FLASH_ALIGN_SIZE;
 
     VERBOSE(LOG_DBG,
-            "program: parsed %d bytes in %d segments with %d records\n",
-            memory_size(&memory), memory_count(&memory), n);
+            "program: parsed %d bytes in %d segments with %d records, write size %d\n",
+            memory_size(&memory), memory_count(&memory), n, write_size);
 
     /* flatten memory */
     memset(flash_mem, 0xff, sizeof(flash_mem));
