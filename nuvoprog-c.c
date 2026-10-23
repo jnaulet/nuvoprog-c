@@ -19,7 +19,14 @@ typedef enum {
     COMMAND_COUNT
 } command_t;
 
-static int connect_to_target(void)
+typedef enum {
+    DEVICE_N76Exxx,             /* 18k */
+    DEVICE_MS51xB,              /* 16k */
+    DEVICE_MS51xC,              /* 32k */
+    DEVICE_COUNT
+} device_t;
+
+static int connect_to_target(device_t *dev)
 {
     uint32_t device_id = 0;
     struct nulink1_version_info info;
@@ -41,10 +48,20 @@ static int connect_to_target(void)
     }
 
     if (device_id == (uint32_t) DEVICE_ID_N76E003 ||
-        device_id == (uint32_t) DEVICE_ID_N76E616 ||
-        device_id == (uint32_t) DEVICE_ID_MS51FB ||
-        device_id == (uint32_t) DEVICE_ID_MS51PC)
+        device_id == (uint32_t) DEVICE_ID_N76E616) {
+	*dev = DEVICE_N76Exxx;
 	return 0;
+    }
+
+    if (device_id == (uint32_t) DEVICE_ID_MS51FB) {
+	*dev = DEVICE_MS51xB;
+	return 0;
+    }
+
+    if (device_id == (uint32_t) DEVICE_ID_MS51PC) {
+	*dev = DEVICE_MS51xC;
+	return 0;
+    }
 
     VERBOSE(LOG_ERR, "connect_to_target: unknown device %x\n", device_id);
     return -(errno = ENOENT);
@@ -71,7 +88,7 @@ static int erase(void)
     return probe_erase_flash_chip(&probe);
 }
 
-static int program(const char *path)
+static int program(device_t dev, const char *path)
 {
 #define FLASH_BLOCK_SIZE 32
 #define FLASH_ALIGN_SIZE FLASH_BLOCK_SIZE
@@ -94,11 +111,23 @@ static int program(const char *path)
 
     /* ihex parsing */
     memory_init(&memory);
+    int write_size = 0;
     int n = parse_file((char *) path, &memory);
-    /* align to the next 4k block */
-    int write_size =
-        ((memory_size(&memory) - 1) & ~(FLASH_ALIGN_SIZE - 1)) +
-        FLASH_ALIGN_SIZE;
+
+    switch (dev) {
+    case DEVICE_N76Exxx:
+	write_size = 18 * 1024;
+	break;
+    case DEVICE_MS51xB:
+	write_size = 16 * 1024;
+	break;
+    case DEVICE_MS51xC:
+	write_size = 32 * 1024;
+	break;
+    default:
+	VERBOSE(LOG_ERR, "program: impossible to find flash size !");
+	return -1;
+    }
 
     VERBOSE(LOG_DBG,
             "program: parsed %d bytes in %d segments with %d records, write size %d\n",
@@ -171,6 +200,7 @@ int main(int argc, char **argv)
 	{ 0, 0, 0, 0 }
     };
 
+    device_t device = DEVICE_COUNT;
     command_t command = COMMAND_NONE;
     const char *arg = NULL;
 
@@ -208,7 +238,7 @@ int main(int argc, char **argv)
 	VERBOSE(LOG_ERR, "Can't init probe\n");
 
     /* normal procedure */
-    if (connect_to_target() != 0) {
+    if (connect_to_target(&device) != 0) {
 	VERBOSE(LOG_ERR, "Can't connect to target\n");
 	return 1;
     }
@@ -221,7 +251,7 @@ int main(int argc, char **argv)
 	(void) erase();
 	break;
     case COMMAND_PROGRAM:
-	(void) program(arg);
+	(void) program(device, arg);
 	break;
     default:
 	VERBOSE(LOG_ERR, "Unknown command %d\n", (int) command);
