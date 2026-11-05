@@ -180,12 +180,36 @@ static void print_usage(const char *argv0)
 {
     VERBOSE(LOG_INFO, "Usage: %s [options]\n", argv0);
     VERBOSE(LOG_INFO, "Options are:\n");
-    VERBOSE(LOG_INFO, " --reset|-r        Reset probe/chip\n");
-    VERBOSE(LOG_INFO, " --erase|-e        Erase chip flash\n");
+    VERBOSE(LOG_INFO, " --reset|-r                   Reset probe/chip\n");
+    VERBOSE(LOG_INFO, " --erase|-e                   Erase chip flash\n");
     VERBOSE(LOG_INFO,
-            " --program|-p ihex Program ihex file to chip memory\n");
-    VERBOSE(LOG_INFO, " --verbose|-v      Display more information\n");
-    VERBOSE(LOG_INFO, " --help|-h         Displays this message\n");
+            " --program|-p ihex            Program ihex file to chip memory\n");
+    VERBOSE(LOG_INFO, " --force|-f n76|ms51xb|ms51xc Force device type\n");
+    VERBOSE(LOG_INFO,
+            " --verbose|-v                 Display more information\n");
+    VERBOSE(LOG_INFO,
+            " --help|-h                    Displays this message\n");
+}
+
+static int parse_force(const char *arg, device_t *dev)
+{
+    if (strcmp(arg, "n76") == 0) {
+	*dev = DEVICE_N76Exxx;
+	return 0;
+    }
+
+    if (strcmp(arg, "ms51xb") == 0) {
+	*dev = DEVICE_MS51xB;
+	return 0;
+    }
+
+    if (strcmp(arg, "ms51xc") == 0) {
+	*dev = DEVICE_MS51xC;
+	return 0;
+    }
+
+    *dev = DEVICE_COUNT;
+    return -1;
 }
 
 int main(int argc, char **argv)
@@ -195,6 +219,7 @@ int main(int argc, char **argv)
 	{ "reset", no_argument, 0, 'r' },
 	{ "erase", no_argument, 0, 'e' },
 	{ "program", required_argument, 0, 'p' },
+	{ "force", required_argument, 0, 'f' },
 	{ "verbose", no_argument, 0, 'v' },
 	{ "help", no_argument, 0, 'h' },
 	{ 0, 0, 0, 0 }
@@ -218,6 +243,13 @@ int main(int argc, char **argv)
 	    command = COMMAND_PROGRAM;
 	    arg = optarg;
 	    break;
+	case 'f':
+	    if (parse_force(optarg, &device) < 0) {
+		fprintf(stderr, "Unknown device %s\n", optarg);
+		print_usage(argv[0]);
+		return 0;
+	    }
+	    break;
 	case 'v':
 	    verbose_level = LOG_DBG;
 	    break;
@@ -238,7 +270,8 @@ int main(int argc, char **argv)
 	VERBOSE(LOG_ERR, "Can't init probe\n");
 
     /* normal procedure */
-    if (connect_to_target(&device) != 0) {
+    if (device == DEVICE_COUNT &&       //
+        connect_to_target(&device) != 0) {
 	VERBOSE(LOG_ERR, "Can't connect to target\n");
 	return 1;
     }
