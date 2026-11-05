@@ -226,11 +226,12 @@ int main(int argc, char **argv)
     };
 
     device_t device = DEVICE_COUNT;
+    device_t forced_device = DEVICE_COUNT;
     command_t command = COMMAND_NONE;
     const char *arg = NULL;
 
     while ((c =
-            getopt_long(argc, argv, "rep:vh", long_options,
+            getopt_long(argc, argv, "rep:f:vh", long_options,
                         &option_index)) != -1) {
 	switch (c) {
 	case 'r':
@@ -244,8 +245,8 @@ int main(int argc, char **argv)
 	    arg = optarg;
 	    break;
 	case 'f':
-	    if (parse_force(optarg, &device) < 0) {
-		fprintf(stderr, "Unknown device %s\n", optarg);
+	    if (parse_force(optarg, &forced_device) < 0) {
+		VERBOSE(LOG_ERR, "--force: unknown device %s\n", optarg);
 		print_usage(argv[0]);
 		return 0;
 	    }
@@ -270,10 +271,15 @@ int main(int argc, char **argv)
 	VERBOSE(LOG_ERR, "Can't init probe\n");
 
     /* normal procedure */
-    if (device == DEVICE_COUNT &&       //
-        connect_to_target(&device) != 0) {
+    if (connect_to_target(&device) != 0) {
 	VERBOSE(LOG_ERR, "Can't connect to target\n");
 	return 1;
+    }
+
+    /* forced */
+    if (forced_device != DEVICE_COUNT) {
+	VERBOSE(LOG_INFO, "Device forced\n");
+	device = forced_device;
     }
 
     switch (command) {
