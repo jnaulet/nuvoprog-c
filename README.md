@@ -1,11 +1,11 @@
-#nuvoprog-c Nuvoton microcontroller programmer (in C)
+# nuvoprog-c Nuvoton microcontroller programmer (in C)
 
 `nuvoprog` is an open source tool for programming Nuvoton microcontollers;
 previously, they could only be programmed under Windows using Nuvoton's
 proprietary tools. This tool assumes a Nuvoton NuLink family programmer
 or compatible; no support is provided (yet) for other programmers.
 
-This tool is VERY CRUDE a port of the excellent nuvoprog tool by Erin
+This tool is VERY CRUDE a port of this excellent work by Erin
 Shepherd you can fin here: https://github.com/erincandescent/nuvoprog.git
 
 Example usage:
@@ -13,6 +13,19 @@ Example usage:
 $ nuvoprog-c --erase
 $ nuvoprog-c --program file.ihx
 
+```
+
+Help:
+```
+Usage: nuvoprog-c [options]
+Options are:
+ --reset|-r                   Reset probe/chip
+ --erase|-e                   Erase chip flash
+ --program|-p ihex            Program ihex file to chip memory
+ --force|-f n76|ms51xb|ms51xc Force device type
+ --verbose|-v                 Display more information
+ --help|-h                    Displays this message
+ 
 ```
 
 You may also be interested in [libn76](https://github.com/erincandescent/libn76),
@@ -40,8 +53,9 @@ $ sudo apt-get install libusb-1.0-0-dev
 
  * N76E003
  * N76E616
- * N76E885
+ * N76Exxx Series
  * MS51FB Series
+ * MS51PC Series
 
 # Missing functionality
 
